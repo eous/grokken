@@ -6,11 +6,14 @@ makes them available by barcode or collection name.
 """
 
 import importlib
+import logging
 import pkgutil
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from grokken.base import BookProcessor
+
+logger = logging.getLogger(__name__)
 
 
 class Registry:
@@ -47,8 +50,13 @@ class Registry:
             try:
                 module = importlib.import_module(modname)
             except ImportError as e:
-                print(f"Warning: Could not import {modname}: {e}")
+                logger.warning("Could not import %s: %s", modname, e)
                 continue
+
+            # Derive collection name from package structure
+            # e.g. grokken.books.principia.psychology_james -> "principia"
+            parts = modname.split(".")
+            collection = parts[2] if len(parts) >= 3 else "default"
 
             # Find all BookProcessor subclasses in this module
             for name in dir(module):
@@ -60,7 +68,7 @@ class Registry:
                     and hasattr(obj, "barcode")
                     and obj.barcode  # Has a non-empty barcode
                 ):
-                    self._register(obj, collection=modname.split(".")[-2] if ispkg else modname.split(".")[-1])
+                    self._register(obj, collection=collection)
 
         self._loaded = True
 
@@ -71,7 +79,8 @@ class Registry:
 
         if collection not in self._by_collection:
             self._by_collection[collection] = []
-        self._by_collection[collection].append(processor_class)
+        if processor_class not in self._by_collection[collection]:
+            self._by_collection[collection].append(processor_class)
 
     def get(self, barcode: str) -> type[BookProcessor] | None:
         """Get a processor class by barcode."""

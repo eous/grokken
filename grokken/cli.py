@@ -8,6 +8,9 @@ Usage:
     grokken list
     grokken list --collection principia
     grokken info --barcode 32044010149714
+    grokken generate --config config.yaml
+    grokken analyze --source data.parquet
+    grokken segment --source data.parquet --barcode 32044010149714
 """
 
 import argparse
@@ -74,6 +77,7 @@ def cmd_process(args: argparse.Namespace) -> int:
         return 1
 
     import pandas as pd
+
     df = pd.read_parquet(source)
 
     if args.barcode:
@@ -96,22 +100,31 @@ def cmd_process(args: argparse.Namespace) -> int:
 
     # Process each book
     results = []
+    errors = 0
     for proc_cls in processors:
         print(f"Processing: {proc_cls.title[:50]}...")
         proc = proc_cls()
         try:
             proc.run(df)
             stats = proc.stats()
-            results.append({
-                "barcode": proc.barcode,
-                "title": proc.title,
-                "text": proc.processed_text,
-                **stats,
-            })
-            print(f"  Done: {stats['raw_chars']:,} -> {stats['processed_chars']:,} chars "
-                  f"({stats['reduction_pct']}% reduction)")
+            results.append(
+                {
+                    "text": proc.processed_text,
+                    **stats,
+                }
+            )
+            print(
+                f"  Done: {stats['raw_chars']:,} -> {stats['processed_chars']:,} chars "
+                f"({stats['reduction_pct']}% reduction)"
+            )
+        except (KeyError, ValueError) as e:
+            errors += 1
+            print(f"  Error processing {proc_cls.barcode}: {e}", file=sys.stderr)
         except Exception as e:
-            print(f"  Error: {e}")
+            errors += 1
+            print(
+                f"  Error processing {proc_cls.barcode}: {type(e).__name__}: {e}", file=sys.stderr
+            )
 
     # Save results
     if results and args.output:
@@ -127,6 +140,8 @@ def cmd_process(args: argparse.Namespace) -> int:
 
         print(f"\nSaved {len(results)} processed books to {output}")
 
+    if errors and not results:
+        return 1
     return 0
 
 
@@ -153,6 +168,15 @@ def main() -> int:
     proc_parser.add_argument("--source", "-s", required=True, help="Source parquet file")
     proc_parser.add_argument("--output", "-o", help="Output file (parquet, jsonl, or csv)")
 
+    # Add generation commands
+    try:
+        from grokken.generation.cli import add_generate_subparsers
+
+        add_generate_subparsers(subparsers)
+    except ImportError:
+        # Generation dependencies not installed
+        pass
+
     args = parser.parse_args()
 
     if args.command == "list":
@@ -161,6 +185,9 @@ def main() -> int:
         return cmd_info(args)
     elif args.command == "process":
         return cmd_process(args)
+    elif hasattr(args, "func"):
+        # Generation commands use func pattern
+        return args.func(args)
     else:
         parser.print_help()
         return 0

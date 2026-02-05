@@ -1,0 +1,35 @@
+# Configuration for processing The Principles of Psychology by William James
+# This is a prototype config for testing the generation pipeline
+
+name: psychology_james_prototype
+source_parquet: experiments/processed/the_principia_34_clean.parquet
+barcode: "32044010149714"  # William James - The Principles of Psychology (1890)
+
+strategy:
+  # Maximum tokens for final context window (GPT-4/GPT-5 limit)
+  max_context_tokens: 131000
+
+  # Target tokens per segment summary (for progressive summarization)
+  segment_summary_tokens: 8000
+
+  # Target tokens for final comprehensive summary
+  final_summary_tokens: 16000
+
+  # Number of Q&A turns to generate from the summary
+  qa_turns: 5
+
+  # Books below this threshold use single-pass summarization
+  short_book_threshold: 131000
+
+provider:
+  name: openai
+  model: gpt-5.2
+  temperature: 0.7
+  max_tokens: 128000
+  timeout: 300.0
+  max_retries: 3
+
+output_dir: experiments/generated/psychology_james
+
+# Checkpoint after each segment (for long books)
+checkpoint_every: 1

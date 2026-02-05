@@ -7,6 +7,55 @@ especially in historical texts with older typefaces.
 
 import regex as re
 
+# Precompiled patterns for fix_common_errors
+_COMMON_ERRORS = [
+    (re.compile(r"\btbe\b"), "the"),
+    (re.compile(r"\bTbe\b"), "The"),
+    (re.compile(r"\bwbich\b"), "which"),
+    (re.compile(r"\bWbich\b"), "Which"),
+    (re.compile(r"\btbat\b"), "that"),
+    (re.compile(r"\bTbat\b"), "That"),
+    (re.compile(r"\btbis\b"), "this"),
+    (re.compile(r"\bTbis\b"), "This"),
+    (re.compile(r"\bwitb\b"), "with"),
+    (re.compile(r"\bWitb\b"), "With"),
+    (re.compile(r"\bfrorn\b"), "from"),
+    (re.compile(r"\bbave\b"), "have"),
+]
+
+# Precompiled patterns for fix_rn_to_m
+_RN_TO_M = [
+    (re.compile(r"\bgovemment\b"), "government"),
+    (re.compile(r"\bGovemment\b"), "Government"),
+    (re.compile(r"\bcommon\b"), "common"),  # Sometimes "cornrnon"
+    (re.compile(r"\bcornrnon\b"), "common"),
+    (re.compile(r"\bmodem\b"), "modern"),
+    (re.compile(r"\bModem\b"), "Modern"),
+    (re.compile(r"\bsumrner\b"), "summer"),
+    (re.compile(r"\bSurnrner\b"), "Summer"),
+]
+
+# Precompiled patterns for fix_digit_letter_confusion
+_RE_DIGIT_L = re.compile(r"(?<=[a-zA-Z])1(?=[a-zA-Z])")
+_RE_DIGIT_O = re.compile(r"(?<=[a-z])0(?=[a-z])")
+
+# Precompiled patterns for remove_ocr_artifacts
+_RE_PUNCT_CLUSTER = re.compile(r"[.,;:]{3,}")
+_RE_ISOLATED_SPECIAL = re.compile(r"^\s*[^\w\s]\s*$", re.MULTILINE)
+_RE_REPEATED_LETTER = re.compile(r"([a-zA-Z])\1{4,}")
+
+# Precompiled patterns for fix_ff_ligature
+_FF_LIGATURE = [
+    (re.compile(r"\bditferent\b"), "different"),
+    (re.compile(r"\bDitferent\b"), "Different"),
+    (re.compile(r"\betfect\b"), "effect"),
+    (re.compile(r"\bEtfect\b"), "Effect"),
+    (re.compile(r"\botfer\b"), "offer"),
+    (re.compile(r"\bOtfer\b"), "Offer"),
+    (re.compile(r"\bsutfer\b"), "suffer"),
+    (re.compile(r"\bSutfer\b"), "Suffer"),
+]
+
 
 def fix_common_errors(text: str) -> str:
     """
@@ -14,27 +63,8 @@ def fix_common_errors(text: str) -> str:
 
     These are character-level confusions common across most OCR systems.
     """
-    # Word-boundary-aware replacements
-    word_replacements = [
-        (r"\btbe\b", "the"),
-        (r"\bTbe\b", "The"),
-        (r"\bwbich\b", "which"),
-        (r"\bWbich\b", "Which"),
-        (r"\btbat\b", "that"),
-        (r"\bTbat\b", "That"),
-        (r"\btbis\b", "this"),
-        (r"\bTbis\b", "This"),
-        (r"\bwitb\b", "with"),
-        (r"\bWitb\b", "With"),
-        (r"\bfrom\b", "from"),  # Often "frorn"
-        (r"\bfrorn\b", "from"),
-        (r"\bhave\b", "have"),  # Often "bave"
-        (r"\bbave\b", "have"),
-    ]
-
-    for pattern, replacement in word_replacements:
-        text = re.sub(pattern, replacement, text)
-
+    for pattern, replacement in _COMMON_ERRORS:
+        text = pattern.sub(replacement, text)
     return text
 
 
@@ -45,20 +75,8 @@ def fix_rn_to_m(text: str) -> str:
     This is a very common OCR error due to the visual similarity.
     Only applies to known safe words to avoid false positives.
     """
-    safe_replacements = [
-        (r"\bgovemment\b", "government"),
-        (r"\bGovemment\b", "Government"),
-        (r"\bcommon\b", "common"),  # Sometimes "cornrnon"
-        (r"\bcornrnon\b", "common"),
-        (r"\bmodem\b", "modern"),
-        (r"\bModem\b", "Modern"),
-        (r"\bsumrner\b", "summer"),
-        (r"\bSurnrner\b", "Summer"),
-    ]
-
-    for pattern, replacement in safe_replacements:
-        text = re.sub(pattern, replacement, text)
-
+    for pattern, replacement in _RN_TO_M:
+        text = pattern.sub(replacement, text)
     return text
 
 
@@ -80,10 +98,10 @@ def fix_digit_letter_confusion(text: str) -> str:
     - '5' at start of word might be 'S'
     """
     # '1' surrounded by letters -> 'l'
-    text = re.sub(r"(?<=[a-zA-Z])1(?=[a-zA-Z])", "l", text)
+    text = _RE_DIGIT_L.sub("l", text)
 
     # '0' surrounded by lowercase letters -> 'o'
-    text = re.sub(r"(?<=[a-z])0(?=[a-z])", "o", text)
+    text = _RE_DIGIT_O.sub("o", text)
 
     return text
 
@@ -95,13 +113,13 @@ def remove_ocr_artifacts(text: str) -> str:
     These are noise patterns that don't represent real text.
     """
     # Random punctuation clusters (likely noise)
-    text = re.sub(r"[.,;:]{3,}", "", text)
+    text = _RE_PUNCT_CLUSTER.sub("", text)
 
     # Isolated special characters on their own lines
-    text = re.sub(r"^\s*[^\w\s]\s*$", "", text, flags=re.MULTILINE)
+    text = _RE_ISOLATED_SPECIAL.sub("", text)
 
-    # Repeated characters that are clearly errors (5+ of same char)
-    text = re.sub(r"(.)\1{4,}", r"\1\1", text)
+    # Repeated letters that are clearly errors (5+ of same letter)
+    text = _RE_REPEATED_LETTER.sub(r"\1\1", text)
 
     return text
 
@@ -112,18 +130,6 @@ def fix_ff_ligature(text: str) -> str:
 
     Common in words like 'different', 'effect', 'offer'.
     """
-    safe_words = [
-        (r"\bditferent\b", "different"),
-        (r"\bDitferent\b", "Different"),
-        (r"\betfect\b", "effect"),
-        (r"\bEtfect\b", "Effect"),
-        (r"\botfer\b", "offer"),
-        (r"\bOtfer\b", "Offer"),
-        (r"\bsutfer\b", "suffer"),
-        (r"\bSutfer\b", "Suffer"),
-    ]
-
-    for pattern, replacement in safe_words:
-        text = re.sub(pattern, replacement, text)
-
+    for pattern, replacement in _FF_LIGATURE:
+        text = pattern.sub(replacement, text)
     return text

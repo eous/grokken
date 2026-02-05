@@ -19,7 +19,7 @@ class PrinciplesPsychology(BookProcessor):
 
     barcode = "32044010149714"
     title = "The Principles of Psychology"
-    author = "William James"
+    author = "James, William"
     date = "1890"
 
     notes = """
@@ -61,24 +61,85 @@ class PrinciplesPsychology(BookProcessor):
     def post_process(self, text: str) -> str:
         """
         Book-specific cleanup for Principles of Psychology.
+
+        1. Removes front matter (library stamps, title page, table of contents)
+        2. Removes back matter (index, advertisements, library stamps)
+        3. Removes running headers throughout the book
         """
-        # Remove running headers (common pattern in this book)
         import regex as re
 
-        # Pattern: page number followed by chapter title or book title
+        # === STRIP FRONT MATTER ===
+        # Front matter includes: library stamps, title page, copyright, table of contents
+        # Actual content starts with "PSYCHOLOGY.\nCHAPTER XVII."
+        front_marker = "PSYCHOLOGY.\nCHAPTER XVII."
+        front_pos = text.find(front_marker)
+        if front_pos > 0:
+            # Keep from "CHAPTER XVII." onwards
+            text = text[front_pos + len("PSYCHOLOGY.\n"):]
+
+        # === STRIP BACK MATTER ===
+        # Book ends with "THE END." followed by index, ads, library stamps
+        end_match = re.search(r"THE END\.\s*\n", text)
+        if end_match:
+            text = text[:end_match.end()]
+
+        # === REMOVE RUNNING HEADERS ===
+
+        # Pattern 1: Page number on own line, followed by "PSYCHOLOGY." (or OCR variants)
+        # Matches: "\n322\nPSYCHOLOGY.\n" or "\n322\nPSYCHOLOG Y.\n" (OCR error with space)
         text = re.sub(
-            r"^\s*\d+\s+(PRINCIPLES OF PSYCHOLOGY|[A-Z][A-Z\s]+)\s*$",
+            r"\n\d{1,4}\nPSYCHOLOG\s?Y\.\n",
+            "\n",
+            text,
+        )
+
+        # Pattern 2: Page number on own line, followed by other all-caps headers
+        # (chapter titles like "SENSATION.", "IMAGINATION.", "INDEX.", etc.)
+        # Note: Use [ ] (space only) not [\s] to avoid matching newlines
+        text = re.sub(
+            r"\n\d{1,4}\n([A-Z][A-Z ]{2,50}\.)\n",
+            "\n",
+            text,
+        )
+
+        # Pattern 3: All-caps header on own line, followed by page number on next line
+        # Matches: "SENSATION.\n3\n" or "NECESSARY TRUTHS-EFFECTS OF EXPERIENCE.\n689\n"
+        # Note: Use [ -] (space and hyphen) not [\s-] to avoid matching newlines
+        text = re.sub(
+            r"\n([A-Z][A-Z -]{2,50}\.)\n\d{1,4}\n",
+            "\n",
+            text,
+        )
+
+        # Pattern 4: Page number followed by header on same line (original patterns)
+        # Note: Use [ ] (space only) not [\s] to avoid matching newlines
+        text = re.sub(
+            r"^[ \t]*\d+[ \t]+(PRINCIPLES OF PSYCHOLOGY|[A-Z][A-Z ]+)[ \t]*$",
             "",
             text,
             flags=re.MULTILINE,
         )
 
-        # Pattern: chapter title followed by page number
+        # Pattern 5: Chapter title followed by page number on same line
+        # Includes hyphens for titles like "NECESSARY TRUTHS-EFFECTS OF EXPERIENCE."
+        # Note: Use [ -] (space and hyphen) not [\s-] to avoid matching newlines
         text = re.sub(
-            r"^([A-Z][A-Z\s]+)\s+\d+\s*$",
+            r"^([A-Z][A-Z -]+\.?)[ \t]+\d+\s*$",
             "",
             text,
             flags=re.MULTILINE,
         )
+
+        # Clean up any resulting multiple blank lines
+        text = re.sub(r"\n{3,}", "\n\n", text)
+
+        # === REFLOW PARAGRAPHS ===
+        # Join lines that are mid-paragraph (OCR line breaks within sentences)
+        # Pattern: lowercase letter at end of line, newline, lowercase letter at start
+        # Replace with: lowercase, space, lowercase (joining the lines)
+        text = re.sub(r"([a-z,;:])\n([a-z])", r"\1 \2", text)
+
+        # Also handle cases ending with closing quote or parenthesis
+        text = re.sub(r"([a-z]['\")])\n([a-z])", r"\1 \2", text)
 
         return text

@@ -5,8 +5,22 @@ Handles page headers, footers, chapter markers, footnotes,
 and other structural elements of books.
 """
 
+from collections.abc import Callable
+
 import regex as re
-from typing import Callable
+
+# Precompiled patterns for remove_page_numbers
+_RE_DECORATED_PAGE_NUM = re.compile(r"^[\s]*[—–-]\s*\d+\s*[—–-][\s]*$", re.MULTILINE)
+_RE_BRACKETED_PAGE_NUM = re.compile(r"^\s*\[\d+\]\s*$", re.MULTILINE)
+
+# Precompiled patterns for remove_footnote_markers
+_RE_BRACKET_NUM = re.compile(r"\[\d+\]")
+_RE_PAREN_NUM = re.compile(r"\(\d+\)")
+_RE_SUPERSCRIPT_NUM = re.compile(r"[⁰¹²³⁴⁵⁶⁷⁸⁹]+")
+_RE_SYMBOL_MARKER = re.compile(r"[*†‡§‖¶]+(?=\s|$)")
+
+# Precompiled pattern for extract_footnotes
+_RE_FOOTNOTE = re.compile(r"^\d+\.\s+.+$")
 
 
 def remove_page_headers(pattern: str, flags: int = re.MULTILINE) -> Callable[[str], str]:
@@ -34,22 +48,21 @@ def remove_page_headers(pattern: str, flags: int = re.MULTILINE) -> Callable[[st
 
 def remove_page_numbers(text: str) -> str:
     """
-    Remove standalone page numbers.
+    Remove standalone page numbers in unambiguous formats.
 
-    Matches common page number formats:
-    - "42"
-    - "— 42 —"
+    Matches decorated and bracketed page number formats:
+    - "\u2014 42 \u2014" / "- 42 -"
     - "[42]"
-    - "- 42 -"
+
+    Does NOT remove plain standalone numbers (e.g. "42" on its own line),
+    as these may be years, verse numbers, section numbers, or table data.
+    Use book-specific post_process() for plain number removal if needed.
     """
-    # Decorated page numbers
-    text = re.sub(r"^[\s]*[—–-]?\s*\d+\s*[—–-]?[\s]*$", "", text, flags=re.MULTILINE)
+    # Decorated page numbers (must have at least one dash/em-dash decoration)
+    text = _RE_DECORATED_PAGE_NUM.sub("", text)
 
     # Bracketed page numbers
-    text = re.sub(r"^\s*\[\d+\]\s*$", "", text, flags=re.MULTILINE)
-
-    # Plain page numbers on their own line (be careful - might match real content)
-    text = re.sub(r"^\s*\d{1,4}\s*$", "", text, flags=re.MULTILINE)
+    text = _RE_BRACKETED_PAGE_NUM.sub("", text)
 
     return text
 
@@ -125,17 +138,17 @@ def remove_footnote_markers(text: str) -> str:
     """
     Remove footnote reference markers from body text.
 
-    Handles common formats: [1], (1), *, †, ‡, §
+    Handles common formats: [1], (1), *, \u2020, \u2021, \u00a7
     """
     # Numeric markers
-    text = re.sub(r"\[\d+\]", "", text)
-    text = re.sub(r"\(\d+\)", "", text)
+    text = _RE_BRACKET_NUM.sub("", text)
+    text = _RE_PAREN_NUM.sub("", text)
 
     # Superscript numbers (if preserved as such)
-    text = re.sub(r"[⁰¹²³⁴⁵⁶⁷⁸⁹]+", "", text)
+    text = _RE_SUPERSCRIPT_NUM.sub("", text)
 
     # Symbol markers
-    text = re.sub(r"[*†‡§‖¶]+(?=\s|$)", "", text)
+    text = _RE_SYMBOL_MARKER.sub("", text)
 
     return text
 
@@ -150,20 +163,17 @@ def extract_footnotes(text: str) -> tuple[str, list[str]]:
     # This is a simplified version - real footnote extraction
     # would need book-specific logic
 
-    # Look for footnote sections (lines starting with numbers)
-    footnote_pattern = r"^\d+\.\s+.+$"
-
     lines = text.split("\n")
     body_lines = []
     footnotes = []
     in_footnotes = False
 
     for line in lines:
-        if re.match(footnote_pattern, line.strip()):
+        if _RE_FOOTNOTE.match(line.strip()):
             in_footnotes = True
             footnotes.append(line.strip())
-        elif in_footnotes and line.strip().startswith(" "):
-            # Continuation of footnote
+        elif in_footnotes and line.startswith(" "):
+            # Continuation of footnote (indented line)
             footnotes[-1] += " " + line.strip()
         else:
             in_footnotes = False

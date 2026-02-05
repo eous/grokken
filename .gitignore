@@ -1,6 +1,16 @@
-# Data directories (large files, symlinked)
-data/raw/
-data/processed/
+# Experiments data (large files)
+experiments/raw/*
+experiments/processed/*
+experiments/generated/*
+!experiments/raw/.gitkeep
+!experiments/processed/.gitkeep
+
+# Claude Code
+.claude/
+
+# Secrets
+.env
+.env.*
 
 # Python
 __pycache__/

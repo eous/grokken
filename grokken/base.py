@@ -5,12 +5,12 @@ Each book (or group of similar books) gets a handler that inherits from
 BookProcessor and defines its specific transforms and quirks.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, ClassVar
+from typing import ClassVar
 
 import pandas as pd
-
 
 # Type alias for transform functions
 Transform = Callable[[str], str]
@@ -55,7 +55,7 @@ class BookProcessor:
     _raw_text: str = field(default="", repr=False)
     _processed_text: str = field(default="", repr=False)
 
-    def load_raw(self, source: Path | pd.DataFrame) -> str:
+    def load_raw(self, source: str | Path | pd.DataFrame) -> str:
         """
         Load raw text from source.
 
@@ -122,7 +122,7 @@ class BookProcessor:
         """
         return text
 
-    def run(self, source: Path | pd.DataFrame) -> str:
+    def run(self, source: str | Path | pd.DataFrame) -> str:
         """
         Full pipeline: load -> process -> return.
 

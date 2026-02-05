@@ -1,7 +1,7 @@
 """Tests for BookProcessor base class."""
 
-import pytest
 import pandas as pd
+import pytest
 
 from grokken.base import BookProcessor
 

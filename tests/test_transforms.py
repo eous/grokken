@@ -1,8 +1,7 @@
 """Tests for transform functions."""
 
-import pytest
 
-from grokken.transforms import encoding, ocr, typography, whitespace, structure
+from grokken.transforms import encoding, ocr, structure, typography, whitespace
 
 
 class TestEncoding:
@@ -40,7 +39,7 @@ class TestTypography:
         assert typography.fix_ligatures(text) == "finding the floor"
 
     def test_normalize_quotes(self):
-        text = '"Hello," she said, 'quietly''
+        text = '\u201cHello,\u201d she said, \u2018quietly\u2019'
         assert typography.normalize_quotes(text) == '"Hello," she said, \'quietly\''
 
     def test_normalize_dashes(self):

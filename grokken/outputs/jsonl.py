@@ -5,15 +5,16 @@ Handles chunking and formatting for model training.
 """
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 
 def chunk_text(
     text: str,
     max_chars: int = 16000,
     overlap_chars: int = 500,
-) -> Iterator[str]:
+) -> Iterator[tuple[int, int, str]]:
     """
     Split text into overlapping chunks.
 
@@ -23,29 +24,44 @@ def chunk_text(
         overlap_chars: Characters to overlap between chunks.
 
     Yields:
-        Text chunks.
+        Tuples of (start_offset, end_offset, chunk_text).
+
+    Raises:
+        ValueError: If overlap_chars >= max_chars or max_chars <= 0.
     """
+    if max_chars <= 0:
+        raise ValueError(f"max_chars must be positive, got {max_chars}")
+    if overlap_chars >= max_chars:
+        raise ValueError(
+            f"overlap_chars ({overlap_chars}) must be less than max_chars ({max_chars})"
+        )
+
     if len(text) <= max_chars:
-        yield text
+        yield 0, len(text), text
         return
 
     start = 0
     while start < len(text):
-        end = start + max_chars
+        end = min(start + max_chars, len(text))
 
         # Try to break at paragraph boundary
         if end < len(text):
-            # Look for paragraph break near the end
             search_start = max(end - 500, start)
             para_break = text.rfind("\n\n", search_start, end)
             if para_break > start:
                 end = para_break + 2  # Include the newlines
 
-        yield text[start:end].strip()
+        yield start, end, text[start:end].strip()
 
-        # Move start, accounting for overlap
-        start = end - overlap_chars
-        if start >= len(text):
+        if end >= len(text):
+            break
+
+        # Overlap is relative to the original (un-snapped) end position
+        # to prevent double-overlap when paragraph snapping moves end backwards
+        next_start = start + max_chars - overlap_chars
+        # But never go past where we actually ended (avoid skipping content)
+        start = min(next_start, end)
+        if start <= 0 or start >= len(text):
             break
 
 
@@ -71,13 +87,14 @@ def chunk_for_training(
     """
     metadata = metadata or {}
 
-    for i, chunk in enumerate(chunk_text(text, max_chars, overlap_chars)):
+    for i, (char_start, char_end, chunk) in enumerate(chunk_text(text, max_chars, overlap_chars)):
         yield {
             "text": chunk,
             "source": {
                 "barcode": barcode,
                 "chunk_index": i,
-                "char_start": i * (max_chars - overlap_chars),  # Approximate
+                "char_start": char_start,
+                "char_end": char_end,
                 **metadata,
             },
         }

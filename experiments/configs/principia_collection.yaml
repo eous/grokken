@@ -1,0 +1,24 @@
+# Configuration for processing the entire Principia 34 collection
+# This will process all 34 books in the collection
+
+name: principia_34_full
+source_parquet: experiments/processed/the_principia_34_clean.parquet
+collection: principia  # Process all books in the principia collection
+
+strategy:
+  max_context_tokens: 131000
+  segment_summary_tokens: 8000
+  final_summary_tokens: 16000
+  qa_turns: 5
+  short_book_threshold: 131000
+
+provider:
+  name: openai
+  model: gpt-5.2
+  temperature: 0.7
+  max_tokens: 128000
+  timeout: 300.0
+  max_retries: 3
+
+output_dir: experiments/generated/principia_34
+checkpoint_every: 1

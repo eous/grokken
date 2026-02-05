@@ -26,6 +26,14 @@ def save_parquet(
     Returns:
         Path to the saved file.
     """
+    if not records:
+        raise ValueError("records list is empty")
+
+    required_fields = {"barcode", "text"}
+    missing = required_fields - records[0].keys()
+    if missing:
+        raise ValueError(f"records missing required fields: {missing}")
+
     output_path = Path(output_path)
     df = pd.DataFrame(records)
     df.to_parquet(output_path, index=False, compression=compression)
