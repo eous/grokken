@@ -297,6 +297,9 @@ class Generator:
             record.segment_summaries.append(segment_summary)
             record.current_segment = i + 1
 
+            # Generate per-segment Q&A (with pressure valve)
+            self._generate_segment_qa(record, segment_summary)
+
             # Checkpoint if configured
             if self.config.checkpoint_every and (i + 1) % self.config.checkpoint_every == 0:
                 self._save_checkpoint(record)
@@ -339,6 +342,53 @@ class Generator:
         record.timestamp = datetime.now(UTC)
 
         return record
+
+    # Threshold in tokens above which per-segment QA is skipped.
+    # Segments near 100K tokens leave little room for QA in a 131K training sample.
+    SEGMENT_QA_TOKEN_THRESHOLD = 105_000
+
+    def _generate_segment_qa(
+        self,
+        record: BookSummaryRecord,
+        segment_summary: SegmentSummary,
+    ) -> None:
+        """
+        Generate per-segment Q&A turns for a single segment summary.
+
+        Skips generation if the segment's summarization conversation already
+        exceeds SEGMENT_QA_TOKEN_THRESHOLD tokens (pressure valve to keep
+        training samples under 131K seq len).
+        """
+        seg_tokens = segment_summary.input_tokens + segment_summary.output_tokens
+        if seg_tokens >= self.SEGMENT_QA_TOKEN_THRESHOLD:
+            logger.info(
+                f"Skipping per-segment QA for '{segment_summary.segment_title}' "
+                f"({seg_tokens:,} tokens >= {self.SEGMENT_QA_TOKEN_THRESHOLD:,} threshold)"
+            )
+            record.segment_qa_conversations.append([])
+            return
+
+        # Use generate_multiturn_qa with a single segment so each answer
+        # sees the full conversation history (not independent single-turn calls).
+        conversation = self.simulated_user.generate_multiturn_qa(
+            title=record.title,
+            author=record.author,
+            segment_summaries=[
+                {
+                    "title": segment_summary.segment_title,
+                    "summary": segment_summary.summary,
+                }
+            ],
+            turns_per_segment=5,
+            temperature=self.config.provider.temperature,
+        )
+
+        num_turns = sum(1 for m in conversation if m.get("role") == "assistant")
+        self._progress(
+            f"Segment '{segment_summary.segment_title}' QA: {num_turns} turns "
+            f"(seg was {seg_tokens:,} tokens)"
+        )
+        record.segment_qa_conversations.append(conversation)
 
     def _generate_qa(self, record: BookSummaryRecord) -> BookSummaryRecord:
         """Generate multi-turn Q&A conversation from segment summaries."""

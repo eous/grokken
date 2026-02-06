@@ -41,7 +41,7 @@ class ProviderConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: Literal["openai"] = Field(
+    name: Literal["openai", "anthropic"] = Field(
         default="openai",
         description="Provider name",
     )

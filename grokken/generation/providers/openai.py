@@ -4,6 +4,7 @@ OpenAI provider implementation.
 Supports GPT-4, GPT-4o, GPT-5.2, and other OpenAI models.
 """
 
+import logging
 import os
 import random
 import time
@@ -22,6 +23,8 @@ from grokken.generation.providers.base import (
     ProviderError,
     RateLimitError,
 )
+
+logger = logging.getLogger(__name__)
 
 # Pricing per 1M tokens (update as needed)
 MODEL_PRICING = {
@@ -151,13 +154,23 @@ class OpenAIProvider(LLMProvider):
                 choice = response.choices[0]
                 usage = response.usage
 
-                return GenerationResult(
+                result = GenerationResult(
                     text=choice.message.content or "",
                     input_tokens=usage.prompt_tokens if usage else 0,
                     output_tokens=usage.completion_tokens if usage else 0,
                     model=response.model,
                     finish_reason=choice.finish_reason,
                 )
+
+                if choice.finish_reason == "length":
+                    logger.warning(
+                        "Response truncated: hit max_tokens limit (%s). "
+                        "Output may be incomplete (%d tokens generated).",
+                        max_tokens,
+                        usage.completion_tokens if usage else 0,
+                    )
+
+                return result
 
             except OpenAIRateLimitError as e:
                 last_error = e
@@ -224,5 +237,9 @@ def create_provider(config: ProviderConfig) -> LLMProvider:
     """
     if config.name == "openai":
         return OpenAIProvider(config)
+    elif config.name == "anthropic":
+        from grokken.generation.providers.anthropic import AnthropicProvider
+
+        return AnthropicProvider(config)
     else:
         raise ValueError(f"Unsupported provider: {config.name}")

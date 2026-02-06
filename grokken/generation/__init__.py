@@ -43,6 +43,7 @@ __all__ = [
     # Provider classes
     "LLMProvider",
     "OpenAIProvider",
+    "AnthropicProvider",
     "create_provider",
     # Exceptions
     "ProviderError",
@@ -50,3 +51,12 @@ __all__ = [
     "AuthenticationError",
     "ContextLengthError",
 ]
+
+
+# Lazy import for AnthropicProvider (requires anthropic SDK)
+def __getattr__(name: str) -> object:
+    if name == "AnthropicProvider":
+        from grokken.generation.providers.anthropic import AnthropicProvider
+
+        return AnthropicProvider
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -109,9 +109,7 @@ class BookSummaryRecord(BaseModel):
     date: str = Field(default="", description="Publication date")
 
     # Strategy used
-    strategy: Literal["short_book", "long_book"] = Field(
-        description="Summarization strategy used"
-    )
+    strategy: Literal["short_book", "long_book"] = Field(description="Summarization strategy used")
 
     # Segmentation (for long books)
     segments: list[Segment] = Field(
@@ -135,6 +133,10 @@ class BookSummaryRecord(BaseModel):
     qa_conversation: list[dict] = Field(
         default_factory=list,
         description="Multi-turn Q&A conversation as list of {role, content} messages",
+    )
+    segment_qa_conversations: list[list[dict]] = Field(
+        default_factory=list,
+        description="Per-segment Q&A conversations, each a list of {role, content} messages",
     )
 
     # Generation metadata
@@ -198,11 +200,11 @@ class BookSummaryRecord(BaseModel):
             "final_context_tokens": self.final_context_tokens,
             "compression_ratio": self.compression_ratio,
             # Segment summaries with full conversations for training
-            "segment_conversations": [
-                seg.to_conversation() for seg in self.segment_summaries
-            ],
+            "segment_conversations": [seg.to_conversation() for seg in self.segment_summaries],
             "summary": self.final_summary,
-            # Multi-turn Q&A conversation (primary format for training)
+            # Per-segment Q&A conversations
+            "segment_qa_conversations": self.segment_qa_conversations,
+            # Multi-turn Q&A conversation (cross-segment)
             "qa_conversation": self.qa_conversation,
             # Legacy single-turn Q&A (deprecated)
             "qa_turns": [turn.model_dump() for turn in self.qa_turns] if self.qa_turns else [],

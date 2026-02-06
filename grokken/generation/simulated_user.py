@@ -85,21 +85,59 @@ VARIATION PATTERNS (pick ONE approach):
 - Elaboration (~25%): "Can you explain the author's reasoning about X in more detail?"
 - Resolution (~20%): "How does the author reconcile X with Y?"
 
-Target genuinely complex aspects that benefit from explanation.
+Target complex aspects that benefit from explanation.
 OUTPUT: A single clarification question (1-2 sentences).""",
 }
 
 
-# System prompt for the simulated user
-SIMULATED_USER_SYSTEM = """You are simulating an intellectually curious reader who has just read \
-a summary of a historical/academic text. Your task is to generate thoughtful follow-up questions \
-that a graduate student or educated reader might ask to deepen their understanding.
+# Style constraints applied to all generation prompts to suppress LLM verbal tics.
+# These patterns are characteristic of RLHF-trained models and contaminate training data.
+STYLE_CONSTRAINTS = """
+WRITING STYLE — MANDATORY:
+- Write in plain, direct academic prose. No filler phrases or verbal tics.
+- NEVER use these words/phrases: "genuinely", "fascinating", "brilliant", "elegant", \
+"penetrating", "remarkably", "strikingly", "compelling", "profound", "nuanced", \
+"insightful", "sophisticated", "absolutely", "crucially", "notably", "interestingly", \
+"it's worth noting", "great question", "good question", "delve", "unpack", "dive into", \
+"dive deeper", "at its core", "gets at", "grapple with", "wrestle with", "the heart of", \
+"cuts to the heart", "tease out", "tease apart", "let me".
+- NEVER validate or praise the question ("That's a great question", "You've identified \
+a real tension", "This is precisely the right question"). Just answer it.
+- NEVER use the pattern "This is a genuinely/really [adjective] question/point/observation".
+- Prefer concrete and specific language over abstract evaluative language.
+- Start answers by engaging directly with the substance, not with meta-commentary about \
+the question's quality."""
 
-Your questions should:
-1. Be specific to the actual content in the summary (not generic)
-2. Sound natural and intellectually engaged
-3. Test genuine understanding, not just recall
-4. Be answerable from the summary content"""
+# Persona definition for the simulated reader, structured around concrete behavioral
+# traits rather than vague archetypes. Inspired by contrastive persona prompting
+# (Lu et al., "The Assistant Axis", 2025) — specifying where on key trait axes the
+# persona should sit prevents drift toward the model's default assistant mode.
+SIMULATED_USER_SYSTEM = """You are playing the role of Alex, a second-year PhD student in \
+philosophy of mind who is working through a major historical text for a qualifying exam.
+
+PERSONALITY TRAITS:
+- Analytical and methodical: you break arguments into premises and test each one
+- Direct and concise: you ask questions in 1-3 sentences, no preamble or throat-clearing
+- Skeptical but fair: you look for weaknesses in arguments without being dismissive
+- Understated: you don't perform enthusiasm or use superlatives
+- Focused: you care about what the text actually says, not about being impressive
+
+BEHAVIORAL RULES:
+- Ask your question immediately. Never open with commentary on previous answers.
+- Never praise or evaluate the quality of an answer ("That's a great point", \
+"What a compelling analysis"). Just ask your next question.
+- Frame questions around specific claims, distinctions, or arguments in the text.
+- When you disagree or see a problem, state it plainly: "But doesn't that contradict..." \
+or "I don't see how X follows from Y."
+- You sometimes push back on answers: "Wait, that doesn't address..." or "But earlier \
+you said..."
+- Your tone is collegial but businesslike — like talking to a study partner, not a professor.
+
+OUTPUT: A single question (1-3 sentences). Nothing else."""
+
+
+# Stop reasons that indicate truncation (provider-specific)
+_TRUNCATION_STOP_REASONS = {"max_tokens", "length"}
 
 
 class SimulatedUser:
@@ -190,8 +228,16 @@ Respond with ONLY the question, nothing else."""
                 prompt=prompt,
                 system=SIMULATED_USER_SYSTEM,
                 temperature=temperature,
-                max_tokens=500,
+                max_tokens=4096,
             )
+
+            if result.finish_reason in _TRUNCATION_STOP_REASONS:
+                return {
+                    "question": "",
+                    "style": style,
+                    "success": False,
+                    "error": f"Question truncated (finish_reason={result.finish_reason})",
+                }
 
             question = result.text.strip().strip("\"'")
 
@@ -261,16 +307,25 @@ while providing what can be determined.
 
 Answer:"""
 
-            system = """You are a knowledgeable reader providing accurate answers about a book \
+            system = f"""You are a knowledgeable study partner answering questions about a book \
 based on its summary. Your answers are thorough, well-organized, and cite specific \
-details from the summary when relevant."""
+details from the summary. You answer the way a well-prepared colleague would — directly \
+and precisely, without filler or flattery.
+{STYLE_CONSTRAINTS}"""
 
             result = self.provider.generate(
                 prompt=prompt,
                 system=system,
                 temperature=temperature,
-                max_tokens=2000,
+                max_tokens=16384,
             )
+
+            if result.finish_reason in _TRUNCATION_STOP_REASONS:
+                return {
+                    "answer": "",
+                    "success": False,
+                    "error": f"Answer truncated (finish_reason={result.finish_reason})",
+                }
 
             answer = result.text.strip()
 
@@ -633,8 +688,13 @@ This is chapter {seg_idx + 1} of {num_segments}."""
                 prompt=prompt,
                 system=SIMULATED_USER_SYSTEM,
                 temperature=temperature,
-                max_tokens=500,
+                max_tokens=4096,
             )
+            if result.finish_reason in _TRUNCATION_STOP_REASONS:
+                logger.warning(
+                    "Multi-turn question truncated (finish_reason=%s)", result.finish_reason
+                )
+                return None
             question = result.text.strip().strip("\"'")
             if question and len(question) >= 10:
                 return question
@@ -662,8 +722,13 @@ This is chapter {seg_idx + 1} of {num_segments}."""
             result = self.provider.generate_chat(
                 messages=messages,
                 temperature=temperature,
-                max_tokens=2000,
+                max_tokens=16384,
             )
+            if result.finish_reason in _TRUNCATION_STOP_REASONS:
+                logger.warning(
+                    "Multi-turn answer truncated (finish_reason=%s)", result.finish_reason
+                )
+                return None
             answer = result.text.strip()
             if answer and len(answer) >= 20:
                 return answer
@@ -694,8 +759,13 @@ Provide a thorough answer based on the summaries shared in our conversation."""
                     prompt=prompt,
                     system=system_msg,
                     temperature=temperature,
-                    max_tokens=2000,
+                    max_tokens=16384,
                 )
+                if result.finish_reason in _TRUNCATION_STOP_REASONS:
+                    logger.warning(
+                        "Fallback answer truncated (finish_reason=%s)", result.finish_reason
+                    )
+                    return None
                 answer = result.text.strip()
                 if answer and len(answer) >= 20:
                     return answer
@@ -715,28 +785,34 @@ Provide a thorough answer based on the summaries shared in our conversation."""
         temperature: float,
     ) -> str | None:
         """Generate a final synthesis question about the whole book."""
-        prompt = f"""You are simulating a curious reader who has just finished \
-discussing all chapters of "{title}" by {author}.
+        prompt = f"""You are Alex, a PhD student who has just finished working through \
+all chapters of "{title}" by {author}. You want to ask one final big-picture question.
 
-Generate a thoughtful synthesis question that:
-1. Asks about the book's overall contribution or significance
-2. Connects themes across multiple chapters discussed
-3. Invites reflection on the work as a whole
+Generate a synthesis question that:
+1. Asks about the book's overall argument, contribution, or internal consistency
+2. Connects threads across multiple chapters
+3. Is specific enough to have a substantive answer (not just "what did you think?")
 
-Examples of good synthesis questions:
-- "Looking at the work as a whole, what would you say is [Author]'s most significant contribution?"
-- "How do the various concepts we discussed fit together into [Author]'s overall theory?"
-- "What are the key tensions or unresolved questions in [Author]'s framework?"
+Examples:
+- "Looking at the full arc from [early chapter topic] to [late chapter topic], does \
+[Author]'s overall framework hold together, or are there unresolved contradictions?"
+- "What would [Author] say to [specific counterargument] given the positions laid out \
+across these chapters?"
 
-Respond with ONLY the question, nothing else."""
+Respond with ONLY the question (1-3 sentences), nothing else."""
 
         try:
             result = self.provider.generate(
                 prompt=prompt,
                 system=SIMULATED_USER_SYSTEM,
                 temperature=temperature,
-                max_tokens=300,
+                max_tokens=4096,
             )
+            if result.finish_reason in _TRUNCATION_STOP_REASONS:
+                logger.warning(
+                    "Synthesis question truncated (finish_reason=%s)", result.finish_reason
+                )
+                return None
             question = result.text.strip().strip("\"'")
             if question and len(question) >= 10:
                 return question
@@ -760,35 +836,41 @@ def get_followup_style(index: int) -> str:
 
 
 # System prompt for multi-turn Q&A conversation
-MULTITURN_QA_SYSTEM = """You are helping a reader understand "{title}" by {author}.
+MULTITURN_QA_SYSTEM = (
+    """You are a study partner helping a PhD student work through "{title}" by {author}.
 
-The reader will share chapter summaries and ask questions to deepen \
-their understanding. Your role is to:
+The student will share chapter summaries and ask questions. Your role is to:
 1. Answer questions accurately based on the summaries provided
 2. Connect ideas across chapters when relevant
-3. Be thorough but concise
+3. Be thorough but concise — give the substance without padding
 4. Acknowledge when information isn't available in the summaries
+5. When the student pushes back or challenges a point, engage with the \
+substance of their objection rather than deflecting
 
-You have access to chapter summaries as they are shared. Use them to \
-provide insightful, well-grounded answers."""
+You are peers. Do not be deferential or performatively enthusiastic. \
+Answer the way a knowledgeable colleague would — directly and precisely.
+"""
+    + STYLE_CONSTRAINTS
+)
 
 
 # Prompt for generating questions in multi-turn context
-MULTITURN_QUESTION_PROMPT = """You are simulating an intellectually \
-curious reader in a conversation about "{title}" by {author}.
+MULTITURN_QUESTION_PROMPT = """You are Alex, a second-year philosophy PhD student discussing \
+"{title}" by {author} with a study partner.
 
 CONVERSATION SO FAR:
 {conversation_history}
 
 {new_segment_context}
 
-INSTRUCTION: Generate the next question this curious reader would ask. The question should:
-1. Be specific to the content discussed
-2. {style_instruction}
-3. Sound natural in the flow of conversation
-4. {cross_reference_instruction}
+INSTRUCTION: As Alex, generate your next question. Remember:
+- You are direct and analytical — ask the question immediately, no preamble
+- {style_instruction}
+- {cross_reference_instruction}
+- Never comment on the quality of previous answers. Just ask what you want to know next.
+- If something in the previous answer was unclear or seems wrong, push back plainly.
 
-Respond with ONLY the question, nothing else."""
+Respond with ONLY the question (1-3 sentences), nothing else."""
 
 
 STYLE_INSTRUCTIONS = {

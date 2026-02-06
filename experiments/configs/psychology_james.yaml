@@ -22,8 +22,8 @@ strategy:
   short_book_threshold: 131000
 
 provider:
-  name: openai
-  model: gpt-5.2
+  name: anthropic
+  model: claude-opus-4-6
   temperature: 0.7
   max_tokens: 128000
   timeout: 300.0
