@@ -56,7 +56,7 @@ class ProviderConfig(BaseModel):
         description="Sampling temperature",
     )
     max_tokens: int = Field(
-        default=128000,
+        default=16384,
         description="Maximum tokens in response",
     )
     timeout: float = Field(

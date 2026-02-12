@@ -1,0 +1,25 @@
+# Configuration for processing The Federalist (1864 reprint)
+# Hamilton, Madison, Jay — foundational American political philosophy
+
+name: federalist_e2e
+source_parquet: experiments/processed/the_principia_34_clean.parquet
+barcode: "32044072043805"  # The Federalist (1864)
+
+strategy:
+  max_context_tokens: 131000
+  segment_summary_tokens: 8000
+  final_summary_tokens: 16000
+  qa_turns: 5
+  short_book_threshold: 131000
+
+provider:
+  name: anthropic
+  model: claude-opus-4-6
+  temperature: 0.7
+  max_tokens: 16384
+  timeout: 600.0
+  max_retries: 3
+
+output_dir: experiments/generated/federalist
+
+checkpoint_every: 1

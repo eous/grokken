@@ -118,7 +118,11 @@ class BookSummaryRecord(BaseModel):
     )
     segment_summaries: list[SegmentSummary] = Field(
         default_factory=list,
-        description="Progressive summaries for each segment",
+        description="Progressive summaries for each segment (working list, compacted in-place)",
+    )
+    segment_summaries_archive: list[SegmentSummary] = Field(
+        default_factory=list,
+        description="All segment summaries preserved for export (not affected by compaction)",
     )
 
     # Final outputs
@@ -200,7 +204,11 @@ class BookSummaryRecord(BaseModel):
             "final_context_tokens": self.final_context_tokens,
             "compression_ratio": self.compression_ratio,
             # Segment summaries with full conversations for training
-            "segment_conversations": [seg.to_conversation() for seg in self.segment_summaries],
+            # Use archive (all summaries) if available, else working list
+            "segment_conversations": [
+                seg.to_conversation()
+                for seg in (self.segment_summaries_archive or self.segment_summaries)
+            ],
             "summary": self.final_summary,
             # Per-segment Q&A conversations
             "segment_qa_conversations": self.segment_qa_conversations,

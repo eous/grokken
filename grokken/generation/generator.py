@@ -18,6 +18,7 @@ from grokken.generation.analyzer import BookAnalyzer
 from grokken.generation.books import get_handler
 from grokken.generation.config import GenerationConfig
 from grokken.generation.prompts import (
+    SUMMARIZATION_SYSTEM,
     format_final_summary_prompt,
     format_segment_prompt,
     format_short_book_prompt,
@@ -117,6 +118,97 @@ class Generator:
         cost = self.provider.estimate_cost(input_tokens, output_tokens)
         self._generation_result.add_cost(input_tokens, output_tokens, cost)
         return cost
+
+    def _maybe_compact_summaries(self, record: BookSummaryRecord) -> None:
+        """
+        Compact accumulated summaries if they exceed 80% of max_context_tokens.
+
+        When triggered, sends all accumulated summaries to the LLM to be
+        re-summarized into a single compacted summary. This acts as a pressure
+        valve for very long books where progressive summaries would otherwise
+        overflow the context window.
+        """
+        if len(record.segment_summaries) < 2:
+            return
+
+        accumulated = record.get_accumulated_summaries()
+        accumulated_tokens = self.analyzer.count_tokens(accumulated)
+        # Compact at 60% to stay well under the QA pressure valve
+        # (SEGMENT_QA_TOKEN_THRESHOLD), which skips QA when the summarization
+        # call's total tokens exceed 105K. At 80%, accumulated summaries plus
+        # segment text push past that threshold before compaction fires.
+        threshold = int(self.config.strategy.max_context_tokens * 0.6)
+
+        if accumulated_tokens <= threshold:
+            return
+
+        n_summaries = len(record.segment_summaries)
+        self._progress(
+            f"Compacting {n_summaries} summaries "
+            f"({accumulated_tokens:,} tokens > {threshold:,} threshold)"
+        )
+
+        # Build compaction prompt
+        segment_titles = [s.segment_title for s in record.segment_summaries]
+        titles_list = ", ".join(segment_titles)
+        target_tokens = min(
+            self.config.strategy.segment_summary_tokens * 3,
+            accumulated_tokens // 2,
+        )
+        prompt = (
+            f'You are compacting progressive summaries of "{record.title}" '
+            f"by {record.author}.\n\n"
+            f"Below are {n_summaries} segment summaries covering: {titles_list}\n\n"
+            f"---\n\n{accumulated}\n\n---\n\n"
+            f"Synthesize ALL of the above into a single comprehensive summary that:\n"
+            f"1. Preserves all key arguments, names, concepts, and evidence\n"
+            f"2. Maintains the logical flow and chronological structure\n"
+            f"3. Retains enough detail to support detailed Q&A\n"
+            f"4. Connects ideas across segments where relevant\n\n"
+            f"This compacted summary will serve as context for summarizing "
+            f"subsequent segments, so completeness is critical.\n\n"
+            f"TARGET LENGTH: Approximately {target_tokens:,} tokens.\n\n"
+            f"Provide your compacted summary:"
+        )
+
+        result = self.provider.generate(
+            prompt=prompt,
+            system=SUMMARIZATION_SYSTEM,
+            temperature=self.config.provider.temperature,
+            max_tokens=self.config.provider.max_tokens,
+        )
+        cost = self._track_cost(result.input_tokens, result.output_tokens)
+
+        # Determine the full segment range this compaction covers
+        first_title = record.segment_summaries[0].segment_title
+        if first_title.startswith("Compacted summary"):
+            # Re-compaction: preserve original range start
+            range_desc = first_title.split("(")[-1].rstrip(")")
+            range_start = range_desc.split("-")[0].strip()
+        else:
+            range_start = "1"
+
+        # Replace all summaries with the single compacted one
+        compacted = SegmentSummary(
+            segment_index=-1,
+            segment_title=(f"Compacted summary ({range_start}-{record.current_segment})"),
+            system_prompt=SUMMARIZATION_SYSTEM,
+            user_prompt=prompt,
+            summary=result.text,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            model=result.model,
+        )
+        record.segment_summaries = [compacted]
+
+        # Persist compaction immediately (expensive operation, don't lose on crash)
+        self._save_checkpoint(record)
+
+        compacted_tokens = self.analyzer.count_tokens(result.text)
+        self._progress(
+            f"Compacted {n_summaries} summaries: "
+            f"{accumulated_tokens:,} -> {compacted_tokens:,} tokens (cost: ${cost:.4f})"
+        )
 
     def load_book_text(self, barcode: str) -> tuple[str, dict]:
         """
@@ -256,11 +348,14 @@ class Generator:
                 total_segments,
             )
 
-            # Get accumulated summaries
-            accumulated = record.get_accumulated_summaries() if record.segment_summaries else None
-
             # Get segment text
             segment_text = self.segmenter.get_segment_text(text, segment)
+
+            # Compact summaries if approaching context limit
+            self._maybe_compact_summaries(record)
+
+            # Get accumulated summaries
+            accumulated = record.get_accumulated_summaries() if record.segment_summaries else None
 
             # Generate segment summary
             system, prompt = format_segment_prompt(
@@ -295,6 +390,7 @@ class Generator:
                 model=result.model,
             )
             record.segment_summaries.append(segment_summary)
+            record.segment_summaries_archive.append(segment_summary)
             record.current_segment = i + 1
 
             # Generate per-segment Q&A (with pressure valve)

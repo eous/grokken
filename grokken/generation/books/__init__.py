@@ -8,10 +8,11 @@ Phase 0 has per-book processors for text cleaning.
 from grokken.generation.books.base import GenerationHandler
 
 # Import all handlers
-from grokken.generation.books.principia import PsychologyJamesHandler
+from grokken.generation.books.principia import FederalistHandler, PsychologyJamesHandler
 
 # Registry mapping barcode -> handler class
 _HANDLERS: dict[str, type[GenerationHandler]] = {
+    FederalistHandler.barcode: FederalistHandler,
     PsychologyJamesHandler.barcode: PsychologyJamesHandler,
 }
 
@@ -47,5 +48,6 @@ __all__ = [
     "get_handler",
     "has_handler",
     "list_handlers",
+    "FederalistHandler",
     "PsychologyJamesHandler",
 ]
